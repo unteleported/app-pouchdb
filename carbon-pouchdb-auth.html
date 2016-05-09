@@ -1,0 +1,220 @@
+<link rel="import" href="pouchdb.authentication.html">
+<link rel="import" href="carbon-pouchdb-database-behavior.html">
+<link rel="import" href="carbon-network-status-behavior.html">
+
+<dom-module id="carbon-pouchdb-auth">
+<script>
+  Polymer({
+    is: 'carbon-pouchdb-auth',
+
+    behaviors: [Polymer.CarbonPouchDBDatabaseBehavior],
+
+    properties: {
+      session: {
+        type: Object,
+        readOnly: true
+      },
+
+      isLoggedIn: {
+        type: Boolean,
+        computed: '_computeIsLoggedIn(session.userCtx.name)'
+      },
+
+      __logoutRetryInterval: {
+        type: Number,
+        value: 0
+      }
+    },
+
+    observers: ['_onDbChange(db)'],
+
+    _onDbChange: function() {
+      if (!this.db) {
+        return;
+      }
+
+      this.__getSession().then(function() {
+        if (window.localStorage.getItem('loggingOut')) {
+          this.logout();
+        }
+      }.bind(this));
+    },
+
+    login: function(username, password) {
+      var source = 'login';
+
+      try {
+        return this.db.login(username, password).then(function(response) {
+          return this.__getSession(response, source);
+
+        }.bind(this)).catch(this.__errorHandler(source).bind(this));
+
+      } catch (error) {
+        return this.__errorHandler(source)(error);
+      }
+    },
+
+    logout: function() {
+      var source = 'logout';
+
+      try {
+        return this.db.logout().then(function(response) {
+          response.online = true;
+          this.__logoutRetryInterval = 0;
+
+          window.localStorage.setItem('loggingOut', false);
+
+          return this.__getSession(response, source);
+
+        }.bind(this)).catch(function(error){
+          if (error.status == 500) {
+            return this.__retryLogout();
+          } else {
+            return this.__errorHandler(source)(error);
+          }
+
+        }.bind(this));
+
+      } catch (error) {
+        return this.__errorHandler(source)(error);
+      }
+    },
+
+    signup: function(username, password, options) {
+      if (!options) {
+        options = {};
+      }
+
+      var source = 'signup';
+
+      try {
+        return this.__promiseHandler(this.db.signup(username, password,
+            options), source);
+
+      } catch (error) {
+        return this.__errorHandler(source)(error);
+      }
+    },
+
+    getUser: function(username) {
+      var source = 'get user';
+
+      try {
+        return this.__promiseHandler(this.db.getUser(username), source);
+
+      } catch (error) {
+        return this.__errorHandler(source)(error);
+      }
+    },
+
+    updateMetadata: function(options, username) {
+      if (!username) {
+        username = this.session.userCtx.name;
+      }
+
+      var source = 'update metadata'
+
+      try {
+        return this.__promiseHandler(this.db.putUser(username, options),
+            source);
+
+      } catch (error) {
+        return this.__errorHandler(source)(error);
+      }
+    },
+
+    updateUsername: function(newUsername, username) {
+      if (!username) {
+        username = this.session.userCtx.name;
+      }
+
+      var source = 'change username';
+
+      try {
+        return this.__promiseHandler(this.db.changeUsername(username,
+            newUsername), source);
+
+      } catch (error) {
+        return this.__errorHandler(source)(error);
+      }
+    },
+
+    updatePassword: function(newPassword, username) {
+      if (!username) {
+        username = this.session.userCtx.name;
+      }
+
+      var source = 'change password';
+
+      try {
+        return this.__promiseHandler(this.db.changePassword(username,
+            newPassword), source);
+
+      } catch (error) {
+        return this.__errorHandler(source)(error);
+      }
+    },
+
+    _computeIsLoggedIn: function(username) {
+      return username ? true : false;
+    },
+
+    __retryLogout: function() {
+      if (!this.__logoutRetryInterval) {
+        this.set('session.userCtx.name', null);
+        this.set('session.userCtx.roles', []);
+
+        this.__logoutRetryInterval = 100;
+        window.localStorage.setItem('loggingOut', true);
+
+      } else {
+        this.__logoutRetryInterval = Math.min(this.__logoutRetryInterval * 2,
+            60000);
+      }
+
+      this.async(this.logout, this.__logoutRetryInterval);
+
+      return Promise.resolve({ok: true, online: false});
+    },
+
+    __getSession: function(customResponse, source) {
+      return this.db.getSession().then(function(response) {
+        this._setSession(response);
+
+        var finalResponse = customResponse ? customResponse : response;
+
+        this.fire('carbon-pouchdb-auth-response',
+            {source: 'change username',
+            response: finalResponse});
+
+        return Promise.resolve(finalResponse);
+
+      }.bind(this)).catch(this.__errorHandler(source).bind(this));
+    },
+
+    __errorHandler: function(errorSource) {
+      return function(error) {
+        this.fire('carbon-pouchdb-auth-error',
+            {source: errorSource, error: error});
+
+        console.error(error);
+        return Promise.reject(error);
+      }
+    },
+
+    __responseHandler: function(responseSource) {
+      return function(response) {
+        this.fire('carbon-pouchdb-auth-response',
+            {source: responseSource ,response: response});
+
+        return Promise.resolve(response);
+      }
+    },
+
+    __promiseHandler: function(promise, source) {
+      return promise.then(this.__responseHandler(source).bind(this))
+          .catch(this.__errorHandler(source).bind(this));
+    }
+  });
+</script>
+</dom-module>
