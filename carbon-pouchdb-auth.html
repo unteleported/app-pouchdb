@@ -3,217 +3,238 @@
 
 <dom-module id="carbon-pouchdb-auth">
 <script>
-  Polymer({
-    is: 'carbon-pouchdb-auth',
+  (function() {
+    'use-strict';
 
-    behaviors: [Polymer.CarbonPouchDBDatabaseBehavior],
+    var IS_LOGGING_OUT = 'carbon-pouchdb-auth:logging-out';
+    var AUTH_RESPONSE_EVENT = 'carbon-pouchdb-auth-response';
+    var AUTH_RESPONSE_ERROR = 'carbon-pouchdb-auth-error';
+    var COUCH_DB_UNDEFINED_ERROR = Error('No PouchDB instance configured.');
+    var MAX_RETRY_INTERVAL = 60000;
 
-    properties: {
-      session: {
-        type: Object,
-        readOnly: true
-      },
+    Polymer({
+      is: 'carbon-pouchdb-auth',
 
-      isLoggedIn: {
-        type: Boolean,
-        computed: '_computeIsLoggedIn(session.userCtx.name)'
-      },
+      behaviors: [Polymer.CarbonPouchDBDatabaseBehavior],
 
-      __logoutRetryInterval: {
-        type: Number,
-        value: 0
-      }
-    },
+      properties: {
+        session: {
+          type: Object,
+          readOnly: true
+        },
 
-    observers: ['_onDbChange(db)'],
+        isLoggedIn: {
+          type: Boolean,
+          computed: '__computeIsLoggedIn(session.userCtx.name)'
+        },
 
-    _onDbChange: function() {
-      if (!this.db) {
-        return;
-      }
-
-      this.__getSession().then(function() {
-        if (window.localStorage.getItem('loggingOut')) {
-          this.logout();
+        __logoutRetryInterval: {
+          type: Number,
+          value: 0
         }
-      }.bind(this));
-    },
+      },
 
-    login: function(username, password) {
-      var source = 'login';
+      observers: ['_dbChanged(db)'],
 
-      try {
-        return this.db.login(username, password).then(function(response) {
-          return this.__getSession(response, source);
+      _dbChanged: function() {
+        if (!this.db) {
+          return;
+        }
 
-        }.bind(this)).catch(this.__errorHandler(source).bind(this));
+        this.db.getSession().then(function(session) {
+          this._setSession(session);
 
-      } catch (error) {
-        return this.__errorHandler(source)(error);
-      }
-    },
+          if (window.localStorage.getItem(IS_LOGGING_OUT)) {
+            this.logout();
+          }
+        }.bind(this));
+      },
 
-    logout: function() {
-      var source = 'logout';
+      login: function(username, password) {
+        var source = 'login';
+        var errorHandler = this.__createErrorHandler(source);
 
-      try {
-        return this.db.logout().then(function(response) {
-          response.online = true;
+        if (!this.db) {
+          return errorHandler(new COUCH_DB_UNDEFINED_ERROR);
+        }
+
+        return this.db.login(username, password).then(function(loginResponse) {
+          return this.db.getSession().then(function(session) {
+            this._setSession(session);
+
+            var finalResponse = {loginResponse, session};
+
+            this.fire(AUTH_RESPONSE_EVENT,
+                {source: source, response: finalResponse});
+
+            return Promise.resolve(finalResponse);
+
+          }.bind(this));
+
+        }.bind(this)).catch(errorHandler);
+      },
+
+      logout: function() {
+        var source = 'logout';
+        var errorHandler = this.__createErrorHandler(source);
+
+        if (!this.db) {
+          return errorHandler(new COUCH_DB_UNDEFINED_ERROR);
+        }
+
+        return this.db.logout().then(function(logoutResponse) {
+          logoutResponse.online = true;
           this.__logoutRetryInterval = 0;
 
-          window.localStorage.setItem('loggingOut', false);
+          window.localStorage.setItem(IS_LOGGING_OUT, false);
 
-          return this.__getSession(response, source);
+          return this.db.getSession().then(function(session) {
+            this._setSession(session);
+
+            var finalResponse = {logoutResponse, session};
+
+            this.fire(AUTH_RESPONSE_EVENT,
+                {source: source, response: finalResponse});
+
+            return Promise.resolve(finalResponse);
+
+          }.bind(this));
 
         }.bind(this)).catch(function(error){
           if (error.status == 500) {
             return this.__retryLogout();
           } else {
-            return this.__errorHandler(source)(error);
+            return errorHandler(error);
           }
 
         }.bind(this));
+      },
 
-      } catch (error) {
-        return this.__errorHandler(source)(error);
-      }
-    },
+      signup: function(username, password, options) {
+        var source = 'signup';
+        var errorHandler = this.__createErrorHandler(source);
 
-    signup: function(username, password, options) {
-      if (!options) {
-        options = {};
-      }
+        if (!options) {
+          options = {};
+        }
 
-      var source = 'signup';
+        if (!this.db) {
+          return errorHandler(new COUCH_DB_UNDEFINED_ERROR);
+        }
 
-      try {
         return this.__promiseHandler(this.db.signup(username, password,
             options), source);
 
-      } catch (error) {
-        return this.__errorHandler(source)(error);
-      }
-    },
+      },
 
-    getUser: function(username) {
-      var source = 'get user';
+      getUser: function(username) {
+        var source = 'get user';
+        var errorHandler = this.__createErrorHandler(source);
 
-      try {
+        if (!this.db) {
+          return errorHandler(new COUCH_DB_UNDEFINED_ERROR);
+        }
+
         return this.__promiseHandler(this.db.getUser(username), source);
 
-      } catch (error) {
-        return this.__errorHandler(source)(error);
-      }
-    },
+      },
 
-    updateMetadata: function(options, username) {
-      if (!username) {
-        username = this.session.userCtx.name;
-      }
+      updateMetadata: function(options, username) {
+        var source = 'update metadata';
+        var errorHandler = this.__createErrorHandler(source);
 
-      var source = 'update metadata'
+        if (!this.db) {
+          return errorHandler(new COUCH_DB_UNDEFINED_ERROR);
+        }
 
-      try {
-        return this.__promiseHandler(this.db.putUser(username, options),
-            source);
+        if (!username) {
+          username = this.session.userCtx.name;
+        }
 
-      } catch (error) {
-        return this.__errorHandler(source)(error);
-      }
-    },
+        return this.__promiseHandler(this.db.putUser(username, options), source);
+      },
 
-    updateUsername: function(newUsername, username) {
-      if (!username) {
-        username = this.session.userCtx.name;
-      }
+      updateUsername: function(newUsername, username) {
+        var source = 'change username';
+        var errorHandler = this.__createErrorHandler(source);
 
-      var source = 'change username';
+        if (!this.db) {
+          return errorHandler(new COUCH_DB_UNDEFINED_ERROR);
+        }
 
-      try {
+        if (!username) {
+          username = this.session.userCtx.name;
+        }
+
         return this.__promiseHandler(this.db.changeUsername(username,
             newUsername), source);
+      },
 
-      } catch (error) {
-        return this.__errorHandler(source)(error);
-      }
-    },
+      updatePassword: function(newPassword, username) {
+        var source = 'change password';
+        var errorHandler = this.__createErrorHandler(source);
 
-    updatePassword: function(newPassword, username) {
-      if (!username) {
-        username = this.session.userCtx.name;
-      }
+        if (!this.db) {
+          return errorHandler(new COUCH_DB_UNDEFINED_ERROR);
+        }
 
-      var source = 'change password';
+        if (!username) {
+          username = this.session.userCtx.name;
+        }
 
-      try {
         return this.__promiseHandler(this.db.changePassword(username,
             newPassword), source);
 
-      } catch (error) {
-        return this.__errorHandler(source)(error);
+      },
+
+      __computeIsLoggedIn: function(username) {
+        return username ? true : false;
+      },
+
+      __retryLogout: function() {
+        if (!this.__logoutRetryInterval) {
+          this.set('session.userCtx.name', null);
+          this.set('session.userCtx.roles', []);
+
+          this.__logoutRetryInterval = 100;
+          window.localStorage.setItem(IS_LOGGING_OUT, true);
+
+        } else {
+          this.__logoutRetryInterval = Math.min(this.__logoutRetryInterval * 2,
+              MAX_RETRY_INTERVAL);
+        }
+
+        this.async(this.logout, this.__logoutRetryInterval);
+
+        return Promise.resolve({ok: true, online: false});
+      },
+
+      __createErrorHandler: function(errorSource) {
+        return function(error) {
+          this.fire(AUTH_RESPONSE_ERROR,
+              {source: errorSource, error: error});
+
+          console.error(error);
+          return Promise.reject(error);
+        }
+      },
+
+      __createResponseHandler: function(responseSource) {
+        return function(response) {
+          this.fire(AUTH_RESPONSE_EVENT,
+              {source: responseSource ,response: response});
+
+          return Promise.resolve(response);
+        }.bind(this);
+      },
+
+      __promiseHandler: function(promise, source) {
+        var responseHandler = this.__createResponseHandler(source);
+        var errorHandler = this.__createErrorHandler(source);
+
+        return promise.then(responseHandler).catch(errorHandler);
       }
-    },
-
-    _computeIsLoggedIn: function(username) {
-      return username ? true : false;
-    },
-
-    __retryLogout: function() {
-      if (!this.__logoutRetryInterval) {
-        this.set('session.userCtx.name', null);
-        this.set('session.userCtx.roles', []);
-
-        this.__logoutRetryInterval = 100;
-        window.localStorage.setItem('loggingOut', true);
-
-      } else {
-        this.__logoutRetryInterval = Math.min(this.__logoutRetryInterval * 2,
-            60000);
-      }
-
-      this.async(this.logout, this.__logoutRetryInterval);
-
-      return Promise.resolve({ok: true, online: false});
-    },
-
-    __getSession: function(customResponse, source) {
-      return this.db.getSession().then(function(response) {
-        this._setSession(response);
-
-        var finalResponse = customResponse ? customResponse : response;
-
-        this.fire('carbon-pouchdb-auth-response',
-            {source: 'change username',
-            response: finalResponse});
-
-        return Promise.resolve(finalResponse);
-
-      }.bind(this)).catch(this.__errorHandler(source).bind(this));
-    },
-
-    __errorHandler: function(errorSource) {
-      return function(error) {
-        this.fire('carbon-pouchdb-auth-error',
-            {source: errorSource, error: error});
-
-        console.error(error);
-        return Promise.reject(error);
-      }
-    },
-
-    __responseHandler: function(responseSource) {
-      return function(response) {
-        this.fire('carbon-pouchdb-auth-response',
-            {source: responseSource ,response: response});
-
-        return Promise.resolve(response);
-      }
-    },
-
-    __promiseHandler: function(promise, source) {
-      return promise.then(this.__responseHandler(source).bind(this))
-          .catch(this.__errorHandler(source).bind(this));
-    }
-  });
+    });
+  })();
 </script>
 </dom-module>
