@@ -9,7 +9,7 @@
     var IS_LOGGING_OUT = 'carbon-pouchdb-auth:logging-out';
     var AUTH_RESPONSE_EVENT = 'carbon-pouchdb-auth-response';
     var AUTH_RESPONSE_ERROR = 'carbon-pouchdb-auth-error';
-    var COUCH_DB_UNDEFINED_ERROR = Error('No PouchDB instance configured.');
+    var COUCH_DB_UNDEFINED_ERROR = new Error('No PouchDB instance configured.');
     var MAX_RETRY_INTERVAL = 60000;
 
     Polymer({
@@ -55,7 +55,7 @@
         var errorHandler = this.__createErrorHandler(source);
 
         if (!this.db) {
-          return errorHandler(new COUCH_DB_UNDEFINED_ERROR);
+          return errorHandler(COUCH_DB_UNDEFINED_ERROR);
         }
 
         return this.db.login(username, password).then(function(loginResponse) {
@@ -79,14 +79,21 @@
         var errorHandler = this.__createErrorHandler(source);
 
         if (!this.db) {
-          return errorHandler(new COUCH_DB_UNDEFINED_ERROR);
+          return errorHandler(COUCH_DB_UNDEFINED_ERROR);
         }
 
         return this.db.logout().then(function(logoutResponse) {
           logoutResponse.online = true;
           this.__logoutRetryInterval = 0;
 
-          window.localStorage.setItem(IS_LOGGING_OUT, false);
+          try {
+            window.localStorage.setItem(IS_LOGGING_OUT, false);
+          } catch (error) {
+            var errorHandler = this.__createErrorHandler(
+              'logout writing to localStorage');
+
+            errorHandler(error);
+          }
 
           return this.db.getSession().then(function(session) {
             this._setSession(session);
@@ -114,12 +121,10 @@
         var source = 'signup';
         var errorHandler = this.__createErrorHandler(source);
 
-        if (!options) {
-          options = {};
-        }
+        options = options || {};
 
         if (!this.db) {
-          return errorHandler(new COUCH_DB_UNDEFINED_ERROR);
+          return errorHandler(COUCH_DB_UNDEFINED_ERROR);
         }
 
         return this.__promiseHandler(this.db.signup(username, password,
@@ -132,7 +137,7 @@
         var errorHandler = this.__createErrorHandler(source);
 
         if (!this.db) {
-          return errorHandler(new COUCH_DB_UNDEFINED_ERROR);
+          return errorHandler(COUCH_DB_UNDEFINED_ERROR);
         }
 
         return this.__promiseHandler(this.db.getUser(username), source);
@@ -144,7 +149,7 @@
         var errorHandler = this.__createErrorHandler(source);
 
         if (!this.db) {
-          return errorHandler(new COUCH_DB_UNDEFINED_ERROR);
+          return errorHandler(COUCH_DB_UNDEFINED_ERROR);
         }
 
         if (!username) {
@@ -159,7 +164,7 @@
         var errorHandler = this.__createErrorHandler(source);
 
         if (!this.db) {
-          return errorHandler(new COUCH_DB_UNDEFINED_ERROR);
+          return errorHandler(COUCH_DB_UNDEFINED_ERROR);
         }
 
         if (!username) {
@@ -175,7 +180,7 @@
         var errorHandler = this.__createErrorHandler(source);
 
         if (!this.db) {
-          return errorHandler(new COUCH_DB_UNDEFINED_ERROR);
+          return errorHandler(COUCH_DB_UNDEFINED_ERROR);
         }
 
         if (!username) {
@@ -197,7 +202,14 @@
           this.set('session.userCtx.roles', []);
 
           this.__logoutRetryInterval = 100;
-          window.localStorage.setItem(IS_LOGGING_OUT, true);
+          try {
+            window.localStorage.setItem(IS_LOGGING_OUT, true);
+          } catch (error) {
+            var errorHandler = this.__createErrorHandler(
+              'logout writing to localStorage');
+
+            errorHandler(error);
+          }
 
         } else {
           this.__logoutRetryInterval = Math.min(this.__logoutRetryInterval * 2,
