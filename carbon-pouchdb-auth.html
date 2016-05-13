@@ -9,7 +9,7 @@
     var IS_LOGGING_OUT = 'carbon-pouchdb-auth:logging-out';
     var AUTH_RESPONSE_EVENT = 'carbon-pouchdb-auth-response';
     var AUTH_RESPONSE_ERROR = 'carbon-pouchdb-auth-error';
-    var COUCH_DB_UNDEFINED_ERROR = new Error('No PouchDB instance configured.');
+    var COUCH_DB_UNDEFINED_ERROR = 'No PouchDB instance configured.';
     var MAX_RETRY_INTERVAL = 60000;
 
     Polymer({
@@ -55,7 +55,7 @@
         var errorHandler = this.__createErrorHandler(source);
 
         if (!this.db) {
-          return errorHandler(COUCH_DB_UNDEFINED_ERROR);
+          return errorHandler(new Error(COUCH_DB_UNDEFINED_ERROR));
         }
 
         return this.db.login(username, password).then(function(loginResponse) {
@@ -79,7 +79,7 @@
         var errorHandler = this.__createErrorHandler(source);
 
         if (!this.db) {
-          return errorHandler(COUCH_DB_UNDEFINED_ERROR);
+          return errorHandler(new Error(COUCH_DB_UNDEFINED_ERROR));
         }
 
         return this.db.logout().then(function(logoutResponse) {
@@ -124,7 +124,7 @@
         options = options || {};
 
         if (!this.db) {
-          return errorHandler(COUCH_DB_UNDEFINED_ERROR);
+          return errorHandler(new Error(COUCH_DB_UNDEFINED_ERROR));
         }
 
         return this.__promiseHandler(this.db.signup(username, password,
@@ -137,7 +137,7 @@
         var errorHandler = this.__createErrorHandler(source);
 
         if (!this.db) {
-          return errorHandler(COUCH_DB_UNDEFINED_ERROR);
+          return errorHandler(new Error(COUCH_DB_UNDEFINED_ERROR));
         }
 
         return this.__promiseHandler(this.db.getUser(username), source);
@@ -149,7 +149,7 @@
         var errorHandler = this.__createErrorHandler(source);
 
         if (!this.db) {
-          return errorHandler(COUCH_DB_UNDEFINED_ERROR);
+          return errorHandler(new Error(COUCH_DB_UNDEFINED_ERROR));
         }
 
         if (!username) {
@@ -164,7 +164,7 @@
         var errorHandler = this.__createErrorHandler(source);
 
         if (!this.db) {
-          return errorHandler(COUCH_DB_UNDEFINED_ERROR);
+          return errorHandler(new Error(COUCH_DB_UNDEFINED_ERROR));
         }
 
         if (!username) {
@@ -180,7 +180,7 @@
         var errorHandler = this.__createErrorHandler(source);
 
         if (!this.db) {
-          return errorHandler(COUCH_DB_UNDEFINED_ERROR);
+          return errorHandler(new Error(COUCH_DB_UNDEFINED_ERROR));
         }
 
         if (!username) {
