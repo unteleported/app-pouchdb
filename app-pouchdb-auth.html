@@ -1,21 +1,21 @@
 <link rel="import" href="pouchdb.authentication.html">
-<link rel="import" href="carbon-pouchdb-database-behavior.html">
+<link rel="import" href="app-pouchdb-database-behavior.html">
 
-<dom-module id="carbon-pouchdb-auth">
+<dom-module id="app-pouchdb-auth">
 <script>
   (function() {
     'use-strict';
 
-    var IS_LOGGING_OUT = 'carbon-pouchdb-auth:logging-out';
-    var AUTH_RESPONSE_EVENT = 'carbon-pouchdb-auth-response';
-    var AUTH_RESPONSE_ERROR = 'carbon-pouchdb-auth-error';
+    var IS_LOGGING_OUT = 'app-pouchdb-auth:logging-out';
+    var AUTH_RESPONSE_EVENT = 'app-pouchdb-auth-response';
+    var AUTH_RESPONSE_ERROR = 'app-pouchdb-auth-error';
     var COUCH_DB_UNDEFINED_ERROR = 'No PouchDB instance configured.';
     var MAX_RETRY_INTERVAL = 60000;
 
     Polymer({
-      is: 'carbon-pouchdb-auth',
+      is: 'app-pouchdb-auth',
 
-      behaviors: [Polymer.CarbonPouchDBDatabaseBehavior],
+      behaviors: [Polymer.AppPouchDBDatabaseBehavior],
 
       properties: {
         session: {
