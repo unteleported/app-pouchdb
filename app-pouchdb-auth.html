@@ -2,6 +2,74 @@
 <link rel="import" href="app-pouchdb-database-behavior.html">
 
 <dom-module id="app-pouchdb-auth">
+
+<!--
+`app-pouchdb-auth` largely uses nolanlawson's
+[`pouchdb-authentication`](https://github.com/nolanlawson/pouchdb-authentication)
+plugin to manage the user state with a pouchdb server. It can fetch, delete,
+and update  the couchdb session cookie, and indicate whether the user is logged
+in or out.
+
+Every function in this element will return a promise that will resolve with the
+server response or error. If the response is a successful response, an
+`app-pouchdb-auth-response` event will also be fired. If the response is an
+error response, `app-pouchdb-auth-error` event will also be fired.
+
+_Note: The `dbName` MUST point to the remote database._
+
+Example Usage:
+```html
+<app-pouchdb-auth id="auth"
+    db-name="https://remote.dbserver.com:1234/"
+    session="{{session}}"
+    isLoggedIn="{{loggedIn}}"
+    isSetup="{{authReady}}">
+<app-pouchdb-auth>
+
+<script>
+  Polymer({
+    is: 'my-app-name',
+
+    properties: {
+      session: Object,
+      loggedIn: Boolean,
+      authReady: {
+        type: Boolean,
+        observer: '_authReadyChanged'
+      }
+    },;
+
+    // if you choose to listen to the auth events rather than use the promises
+    listeners: {
+      'app-pouchdb-auth-response': '_onPouchdbAuthRes',
+      'app-pouchdb-auth-error': '_onPouchdbAuthErr'
+    },
+
+    _authReadyChanged: function(authReady) {
+      if (!authReady) {
+        return;
+      }
+
+      // Call ready operations here.
+    },
+
+    _onPouchdbAuthRes: function(responseEvent) {
+      var source = responseEvent.source;
+      var response = responseEvent.response;
+
+      ...
+    },
+
+    _onPouchdbAuthErr: function(errorEvent) {
+      var source = errorEvent.source;
+      var error = errorEvent.error;
+
+      ...
+    }
+  });
+</script>
+```
+-->
 <script>
   (function() {
     'use-strict';
@@ -18,15 +86,36 @@
       behaviors: [Polymer.AppPouchDBDatabaseBehavior],
 
       properties: {
+        /**
+         * Current session. See the
+         * [Couchdb session API](https://wiki.apache.org/couchdb/Session_API)
+         * for more info on the contents of this object.
+         */
         session: {
           type: Object,
           readOnly: true
         },
 
+        /**
+         * Notifies if the user is logged in.
+         *
+         * Note: If the user logs out while offline, the session cookie will not
+         * be deleted, but the session object will be cleared and this property
+         * will notify if offline. This is meant to be used for UI purposes.
+         */
         isLoggedIn: {
           type: Boolean,
           computed: '__computeIsLoggedIn(session.userCtx.name)'
         },
+
+        /**
+         * Notifies whether the `app-pouchdb-auth` element is ready to be used.
+         */
+        isSetup: {
+          type: Boolean,
+          value: false,
+          readOnly: true
+        }
 
         __logoutRetryInterval: {
           type: Number,
@@ -39,6 +128,7 @@
       _dbChanged: function() {
         if (!this.db) {
           return;
+          this._setIsSetup('false');
         }
 
         this.db.getSession().then(function(session) {
@@ -48,8 +138,20 @@
             this.logout();
           }
         }.bind(this));
+
+        this._setIsSetup('true');
       },
 
+      /**
+       * Logs in the user and gets the session cookie. This function can only be
+       * used while online.
+       *
+       * @param  {String} username Username of the user logging in.
+       * @param  {String} password Password of the user logging in.
+       * @return {Promise} Promise with the result or error of the login call.
+       * See the [pouchdb-authentication API](https://github.com/nolanlawson/pouchdb-authentication#dbloginusername-password--options--callback)
+       * for response specs.
+       */
       login: function(username, password) {
         var source = 'login';
         var errorHandler = this.__createErrorHandler(source);
@@ -74,6 +176,25 @@
         }.bind(this)).catch(errorHandler);
       },
 
+      /**
+       * Logs out the user. If the user is online, it performs a logout on the
+       * server which in turn deletes the session cookie. If the user is
+       * offline, it sets the session object to an offline session object, but
+       * it does not delete the session cookie. While the user is offline, this
+       * function will repeatedly call itself in an exponential interval (up to
+       * 1 request per minute) until the user is online again and can delete the
+       * session cookie. This function will automatically be called if the user
+       * reopens the web app while in this "logout retry" loop.
+
+       * @return {Promise} Promise with the result or error of the logout call.
+       * The response object follows the
+       * [response API for pouchdb-authentication](https://github.com/nolanlawson/pouchdb-authentication#dbloginusername-password--options--callback),
+       * except this promise will never reject with an error where
+       * `status == 500`, and a successful response will also include an
+       * `online` Boolean parameter which indicates if the logout was initiated
+       * while the user was online or offline. (offline indicates a logout
+       * retry)
+       */
       logout: function() {
         var source = 'logout';
         var errorHandler = this.__createErrorHandler(source);
@@ -117,21 +238,54 @@
         }.bind(this));
       },
 
+      /**
+       * Sign up a new user who does not exist yet. This function can only be
+       * used while the user is online. Example usage:
+       * ```javascript
+       * signup('bbit', 'awesomest P4ssw0rd 3var!', {
+       *   firstName: 'Ben',
+       *   lastName: 'Bitdiddle',
+       *   email: 'bbit@mit.edu',
+       *   profile: {
+       *     tagline: "I'm exemplary!",
+       *     hobbies: ['Being in examples', 'Breaking code']
+       *   }
+       * });
+       * ```
+       *
+       * @param  {String} username Username of user to be created.
+       * @param  {String} password Password to be associated with this user.
+       * @param  {?Object} options Additional metadata to be associated with
+       * this account.
+       * @return {Promise} Promise with the result or error of the signup call.
+       * See the [pouchdb-authentication API](https://github.com/nolanlawson/pouchdb-authentication#dbsignupusername-password--options--callback)
+       * for response specs.
+       */
       signup: function(username, password, options) {
         var source = 'signup';
         var errorHandler = this.__createErrorHandler(source);
-
-        options = options || {};
+        var signupOptions = {metadata: options};
 
         if (!this.db) {
           return errorHandler(new Error(COUCH_DB_UNDEFINED_ERROR));
         }
 
         return this.__promiseHandler(this.db.signup(username, password,
-            options), source);
+            signupOptions), source);
 
       },
 
+      /**
+       * Returns the user document associated with a username. This function can
+       * only be used while the user is online.
+       *
+       * @param  {?String} username Username of the user to fetch user document.
+       * If the argument is not defined, then it will default to the logged-in
+       * user's username.
+       * @return {Promise} Promise with the result or error of the getUser call.
+       * See the [pouchdb-authentication API](https://github.com/nolanlawson/pouchdb-authentication#dbgetuserusername--opts-callback)
+       * for response specs.
+       */
       getUser: function(username) {
         var source = 'get user';
         var errorHandler = this.__createErrorHandler(source);
@@ -140,13 +294,41 @@
           return errorHandler(new Error(COUCH_DB_UNDEFINED_ERROR));
         }
 
+        if (!username) {
+          username = this.session.userCtx.name;
+        }
+
         return this.__promiseHandler(this.db.getUser(username), source);
 
       },
 
+      /**
+       * Updates the user's metadata as an upsert. This function can only be
+       * used while the user is online. Example usage:
+       * ```javascript
+       * updateMetadata({
+       *   email: 'bbit@google.com',
+       *   profile: {
+       *     tagline: "I have a job now!",
+       *     hobbies: ['Being in examples', 'Breaking code']
+       *   }
+       * });
+       * ```
+       *
+       * @param  {?Object} options Metadata to be upserted into the user
+       * document associated with the given username.
+       * @param  {?String} username Username associated with the user document
+       * to be updated. If the argument is not defined, then it will default to
+       * the logged-in user's username.
+       * @return {Promise} Promise with the result or error of the
+       * updateMetadata call. See the
+       * [pouchdb-authentication API](https://github.com/nolanlawson/pouchdb-authentication#dbputuserusername-opts--callback)
+       * for response specs.
+       */
       updateMetadata: function(options, username) {
         var source = 'update metadata';
         var errorHandler = this.__createErrorHandler(source);
+        var putUserOptions = {metadata: options};
 
         if (!this.db) {
           return errorHandler(new Error(COUCH_DB_UNDEFINED_ERROR));
@@ -156,10 +338,24 @@
           username = this.session.userCtx.name;
         }
 
-        return this.__promiseHandler(this.db.putUser(username, options), source);
+        return this.__promiseHandler(this.db.putUser(username, putUserOptions),
+            source);
       },
 
-      updateUsername: function(newUsername, username) {
+      /**
+       * Updates the username of the user associated with the given username.
+       * This function can only be used while the user is online.
+       *
+       * @param  {String} newUsername New username to be assigned to user.
+       * @param  {?String} oldUsername Username associated with the user document
+       * to be updated. If the argument is not defined, then it will default to
+       * the logged-in user's username.
+       * @return {Promise} Promise with the result or error of the
+       * udpateUsername call. See the
+       * [pouchdb-authentication API](https://github.com/nolanlawson/pouchdb-authentication#dbchangeusernameoldusername-newusername-opts-callback)
+       * for response specs.
+       */
+      updateUsername: function(newUsername, oldUsername) {
         var source = 'change username';
         var errorHandler = this.__createErrorHandler(source);
 
@@ -167,14 +363,27 @@
           return errorHandler(new Error(COUCH_DB_UNDEFINED_ERROR));
         }
 
-        if (!username) {
-          username = this.session.userCtx.name;
+        if (!oldUsername) {
+          oldUsername = this.session.userCtx.name;
         }
 
         return this.__promiseHandler(this.db.changeUsername(username,
             newUsername), source);
       },
 
+      /**
+       * Updates the password of the user associated with the given username.
+       * This function can only be used while the user is online.
+       *
+       * @param  {String} newPassword New password to be assigned to the user.
+       * @param  {?String} username Username associated with the user document
+       * to be updated. If the argument is not defined, then it will default to
+       * the logged-in user's username.
+       * @return {Promise} Promise with the result or error of the
+       * udpatePassword call. See the
+       * [pouchdb-authentication API](https://github.com/nolanlawson/pouchdb-authentication#dbchangepasswordusername-password--opts-callback)
+       * for response specs.
+       */
       updatePassword: function(newPassword, username) {
         var source = 'change password';
         var errorHandler = this.__createErrorHandler(source);
@@ -228,13 +437,13 @@
 
           console.error(error);
           return Promise.reject(error);
-        }
+        }.bind(this);
       },
 
       __createResponseHandler: function(responseSource) {
         return function(response) {
           this.fire(AUTH_RESPONSE_EVENT,
-              {source: responseSource ,response: response});
+              {source: responseSource, response: response});
 
           return Promise.resolve(response);
         }.bind(this);
