@@ -22,8 +22,7 @@ Example Usage:
 <app-pouchdb-auth id="auth"
     db-name="https://remote.dbserver.com:1234/"
     session="{{session}}"
-    is-logged-in="{{loggedIn}}"
-    is-setup="{{authReady}}">
+    is-logged-in="{{loggedIn}}">
 <app-pouchdb-auth>
 
 <script>
@@ -32,11 +31,7 @@ Example Usage:
 
     properties: {
       session: Object,
-      loggedIn: Boolean,
-      authReady: {
-        type: Boolean,
-        observer: '_authReadyChanged'
-      }
+      loggedIn: Boolean
     },;
 
     // if you choose to listen to the auth events rather than use the promises
@@ -45,11 +40,7 @@ Example Usage:
       'app-pouchdb-auth-error': '_onPouchdbAuthErr'
     },
 
-    _authReadyChanged: function(authReady) {
-      if (!authReady) {
-        return;
-      }
-
+    ready: function() {
       // Call ready operations here. Such as:
       if (!this.loggedIn) {
         var loginPromise = this.$.auth.login('myUsername', 'myPassword');
@@ -57,6 +48,7 @@ Example Usage:
         // if you choose to use the promise API instead of the listener API
         loginPromise.then(function(response) {// do login stuff here})
           .catch(function(error) {//do error handling stuff here});
+
       } else {
         this.user = this.session.userCtx;
         this.roles = this.user.roles;
@@ -118,18 +110,24 @@ Example Usage:
           computed: '__computeIsLoggedIn(session.userCtx.name)'
         },
 
-        /**
-         * Notifies whether the `app-pouchdb-auth` element is ready to be used.
-         */
-        isSetup: {
-          type: Boolean,
-          value: false,
-          readOnly: true
-        }
-
         __logoutRetryInterval: {
           type: Number,
           value: 0
+        },
+
+        /**
+         * @type {?function()}
+         */
+        __resolveDbDefined: {
+        },
+
+        __dbDefined: {
+          type: Promise,
+          value: function() {
+            return new Promise(function(resolve) {
+              this.__resolveDbDefined = resolve;
+            }.bind(this));
+          }
         }
       },
 
@@ -137,19 +135,23 @@ Example Usage:
 
       _dbChanged: function() {
         if (!this.db) {
+          this.__dbDefined = new Promise(function(resolve) {
+            this.__resolveDbDefined = resolve;
+          }.bind(this));
+
           return;
-          this._setIsSetup('false');
         }
+
+        this.__resolveDbDefined();
 
         this.db.getSession().then(function(session) {
           this._setSession(session);
 
           if (window.localStorage.getItem(IS_LOGGING_OUT)) {
-            this.logout();
+            logout = this.logout();
           }
         }.bind(this));
 
-        this._setIsSetup('true');
       },
 
       /**
@@ -166,24 +168,22 @@ Example Usage:
         var source = 'login';
         var errorHandler = this.__createErrorHandler(source);
 
-        if (!this.db) {
-          return errorHandler(new Error(COUCH_DB_UNDEFINED_ERROR));
-        }
+        return this.__dbDefined.then(function(resolve) {
+          return this.db.login(username, password).then(function(loginResponse) {
+            return this.db.getSession().then(function(session) {
+              this._setSession(session);
 
-        return this.db.login(username, password).then(function(loginResponse) {
-          return this.db.getSession().then(function(session) {
-            this._setSession(session);
+              var finalResponse = {loginResponse, session};
 
-            var finalResponse = {loginResponse, session};
+              this.fire(AUTH_RESPONSE_EVENT,
+                  {source: source, response: finalResponse});
 
-            this.fire(AUTH_RESPONSE_EVENT,
-                {source: source, response: finalResponse});
+              return Promise.resolve(finalResponse);
 
-            return Promise.resolve(finalResponse);
+            }.bind(this));
 
-          }.bind(this));
-
-        }.bind(this)).catch(errorHandler);
+          }.bind(this)).catch(errorHandler);
+        }.bind(this));
       },
 
       /**
@@ -209,42 +209,40 @@ Example Usage:
         var source = 'logout';
         var errorHandler = this.__createErrorHandler(source);
 
-        if (!this.db) {
-          return errorHandler(new Error(COUCH_DB_UNDEFINED_ERROR));
-        }
+        return this.__dbDefined.then(function(resolve) {
+          return this.db.logout().then(function(logoutResponse) {
+            logoutResponse.online = true;
+            this.__logoutRetryInterval = 0;
 
-        return this.db.logout().then(function(logoutResponse) {
-          logoutResponse.online = true;
-          this.__logoutRetryInterval = 0;
+            try {
+              window.localStorage.setItem(IS_LOGGING_OUT, false);
+            } catch (error) {
+              var errorHandler = this.__createErrorHandler(
+                'logout writing to localStorage');
 
-          try {
-            window.localStorage.setItem(IS_LOGGING_OUT, false);
-          } catch (error) {
-            var errorHandler = this.__createErrorHandler(
-              'logout writing to localStorage');
+              errorHandler(error);
+            }
 
-            errorHandler(error);
-          }
+            return this.db.getSession().then(function(session) {
+              this._setSession(session);
 
-          return this.db.getSession().then(function(session) {
-            this._setSession(session);
+              var finalResponse = {logoutResponse, session};
 
-            var finalResponse = {logoutResponse, session};
+              this.fire(AUTH_RESPONSE_EVENT,
+                  {source: source, response: finalResponse});
 
-            this.fire(AUTH_RESPONSE_EVENT,
-                {source: source, response: finalResponse});
+              return Promise.resolve(finalResponse);
 
-            return Promise.resolve(finalResponse);
+            }.bind(this));
+
+          }.bind(this)).catch(function(error){
+            if (error.status == 500) {
+              return this.__retryLogout();
+            } else {
+              return errorHandler(error);
+            }
 
           }.bind(this));
-
-        }.bind(this)).catch(function(error){
-          if (error.status == 500) {
-            return this.__retryLogout();
-          } else {
-            return errorHandler(error);
-          }
-
         }.bind(this));
       },
 
@@ -276,12 +274,10 @@ Example Usage:
         var errorHandler = this.__createErrorHandler(source);
         var signupOptions = {metadata: options};
 
-        if (!this.db) {
-          return errorHandler(new Error(COUCH_DB_UNDEFINED_ERROR));
-        }
-
-        return this.__promiseHandler(this.db.signup(username, password,
+        return this.__dbDefined.then(function(resolve) {
+          return this.__promiseHandler(this.db.signup(username, password,
             signupOptions), source);
+        }.bind(this));
 
       },
 
@@ -300,16 +296,13 @@ Example Usage:
         var source = 'get user';
         var errorHandler = this.__createErrorHandler(source);
 
-        if (!this.db) {
-          return errorHandler(new Error(COUCH_DB_UNDEFINED_ERROR));
-        }
+        return this.__dbDefined.then(function(resolve) {
+          if (!username) {
+            username = this.session.userCtx.name;
+          }
 
-        if (!username) {
-          username = this.session.userCtx.name;
-        }
-
-        return this.__promiseHandler(this.db.getUser(username), source);
-
+          return this.__promiseHandler(this.db.getUser(username), source);
+        }.bind(this));
       },
 
       /**
@@ -340,16 +333,14 @@ Example Usage:
         var errorHandler = this.__createErrorHandler(source);
         var putUserOptions = {metadata: options};
 
-        if (!this.db) {
-          return errorHandler(new Error(COUCH_DB_UNDEFINED_ERROR));
-        }
+        return this.__dbDefined.then(function(resolve) {
+          if (!username) {
+            username = this.session.userCtx.name;
+          }
 
-        if (!username) {
-          username = this.session.userCtx.name;
-        }
-
-        return this.__promiseHandler(this.db.putUser(username, putUserOptions),
-            source);
+          return this.__promiseHandler(this.db.putUser(username, putUserOptions),
+              source);
+        }.bind(this));
       },
 
       /**
@@ -369,16 +360,14 @@ Example Usage:
         var source = 'change username';
         var errorHandler = this.__createErrorHandler(source);
 
-        if (!this.db) {
-          return errorHandler(new Error(COUCH_DB_UNDEFINED_ERROR));
-        }
+        return this.__dbDefined.then(function(resolve) {
+          if (!oldUsername) {
+            oldUsername = this.session.userCtx.name;
+          }
 
-        if (!oldUsername) {
-          oldUsername = this.session.userCtx.name;
-        }
-
-        return this.__promiseHandler(this.db.changeUsername(username,
-            newUsername), source);
+          return this.__promiseHandler(this.db.changeUsername(username,
+              newUsername), source);
+        }.bind(this));
       },
 
       /**
@@ -398,17 +387,14 @@ Example Usage:
         var source = 'change password';
         var errorHandler = this.__createErrorHandler(source);
 
-        if (!this.db) {
-          return errorHandler(new Error(COUCH_DB_UNDEFINED_ERROR));
-        }
+        return this.__dbDefined.then(function(resolve) {
+          if (!username) {
+            username = this.session.userCtx.name;
+          }
 
-        if (!username) {
-          username = this.session.userCtx.name;
-        }
-
-        return this.__promiseHandler(this.db.changePassword(username,
-            newPassword), source);
-
+          return this.__promiseHandler(this.db.changePassword(username,
+              newPassword), source);
+        }.bind(this));
       },
 
       __computeIsLoggedIn: function(username) {
