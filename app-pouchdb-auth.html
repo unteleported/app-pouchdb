@@ -15,15 +15,15 @@ server response or error. If the response is a successful response, an
 `app-pouchdb-auth-response` event will also be fired. If the response is an
 error response, `app-pouchdb-auth-error` event will also be fired.
 
-_Note: The `dbName` MUST point to the remote database._
+_Note: The `dbName` MUST point to a remote database._
 
 Example Usage:
 ```html
 <app-pouchdb-auth id="auth"
     db-name="https://remote.dbserver.com:1234/"
     session="{{session}}"
-    isLoggedIn="{{loggedIn}}"
-    isSetup="{{authReady}}">
+    is-logged-in="{{loggedIn}}"
+    is-setup="{{authReady}}">
 <app-pouchdb-auth>
 
 <script>
@@ -50,7 +50,17 @@ Example Usage:
         return;
       }
 
-      // Call ready operations here.
+      // Call ready operations here. Such as:
+      if (!this.loggedIn) {
+        var loginPromise = this.$.auth.login('myUsername', 'myPassword');
+
+        // if you choose to use the promise API instead of the listener API
+        loginPromise.then(function(response) {// do login stuff here})
+          .catch(function(error) {//do error handling stuff here});
+      } else {
+        this.user = this.session.userCtx;
+        this.roles = this.user.roles;
+      }
     },
 
     _onPouchdbAuthRes: function(responseEvent) {
