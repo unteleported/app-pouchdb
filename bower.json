@@ -21,7 +21,7 @@
     "pouchdb": "^6.0.4",
     "pouchdb-find": "^0.10.0",
     "promise-polyfill": "polymerlabs/promise-polyfill#^1.0.0",
-    "app-storage": "git@github.com:unteleported/app-storage.git"
+    "app-storage": "git@github.com:unteleported/app-storage.git#master"
   },
   "devDependencies": {
     "web-component-tester": "^4.0.0",
